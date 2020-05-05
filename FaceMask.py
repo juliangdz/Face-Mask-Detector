@@ -6,6 +6,10 @@ import sys
 import matplotlib.pyplot as plt
 import xmltodict
 import time, datetime
+import torch 
+import torchvision.models as models
+import torchvision.transforms as transforms
+import torchvsion.datasets as datasets
 
 
 #To get thre image names from the Label Name
@@ -69,18 +73,69 @@ def getAnnot(data_dir,imgN):
 
 
 #Create Directory 
-def Createdir(home_dir,dir_name):
-	dir_path = home_dir + dir_name + '/'
+def Createdir(dir_path): 
 	if  not os.path.exists(dir_path):
 		os.mkdir(dir_path)
 
-#Create Labels for training 
-def croplabel(data_dir,label_name,status=True):
+#Create Labels for training saveed in Train Image Folder
+def croplabel(data_dir,home_dir,label_name,status=False):
 	if status==True:
-		
+		for l in range(len(label_name)):
+			ext = label_name[l][1]
+			Aname = label_name[l][0]
+			result,size = getAnnot(data_dir,Aname)
+			for r in range(len(result)):
+				name = result[r][0]
+				bndbox = result[r][1]
+				image_path = data_dir + 'images' + '/' + Aname + ext
+				image = cv2.imread(image_path)
+				image = cv2.cvtColor(image,cv2.COLOR_BGR2RGB)
+				if name=='good':
+					roi = image[bndbox[0][1]:bndbox[1][1],bndbox[0][0]:bndbox[1][0]]
+					dir_0 = home_dir + 'train/' + '0/'
+					Createdir(dir_0)
+					cv2.imwrite(dir_0+Aname+'.jpg',roi)
+					print("Created First Directory")
+				elif name=='bad':
+					roi = image[bndbox[0][1]:bndbox[1][1],bndbox[0][0]:bndbox[1][0]]
+					dir_1 = home_dir + 'train/' + '1/'
+					Createdir(dir_1)
+					cv2.imwrite(dir_1+Aname+'.jpg',roi)
+					print("Created 2nd Directory ")
+
+#Load pretrainied resnet model
+def loadModel():
+	model = models.resnet50(pretrainied=True)
+	for layer,param in model.named_parameters():
+		if 'layer4' not in layer:
+			param.requires_grad=False
+
+		model.fc = torch.nn.Sequential(torch.nn.Linear(2048,512),
+			torch.nn.ReLu(),
+			torch.nn.Dropout(0.2),
+			torch.nn.Linear(512,2),
+			torch.nn.LogSoftmax(dim=1))
+
+	train_transforms = transforms.Compose([transforms.Resize(224,224),
+		transforms.ToTensor(),
+		transforms.Normalize((0.5,0.5,0.5),(0.5,0.5,0.5))
+		])
+	return model, train_transforms
+
+def DatasetSplit(train_dir,train_transforms):
+	dataset = datasets.ImageFolder(train_dir,train=train_transforms)
+	dataset_size = len(dataset)
+	train_size = int(len(dataset*0.6))
+	val_size = int(len(dataset*0.2))
+	test_size = dataset_size - train_size - val_size
+	train_dataset,val_dataset,test_dataset=torch.utils.data.random_split(dataset,[train_size,val_size,test_size])
+	print("Length of Dataset :",dataset_size)
+	print("Lenght of train dataset : ",train_size)
+	print("Length of Val Dataset :",val_size)
+	print("Length of Test Size : ", test_size)
 
 
-
+#Main Function
 def main():
 	config = configparser.RawConfigParser()
 	config.read('/home/ubuntu/Desktop/Julian_Folder/Projects/Face-Mask-Detector/FaceMask.ini')
@@ -89,6 +144,11 @@ def main():
 	label_name = getImageName(data_dir)
 	print("labelNames: ",len(label_name))
 	ShowImage(data_dir,label_name)
+	train_dir = home_dir + 'train/'
+	Createdir(train_dir)
+	croplabel(data_dir,home_dir,label_name)
+	model,train_transforms = loadModel()
+	DatasetSplit(train_dir,train_transforms)
 
 
 if __name__ == '__main__':
